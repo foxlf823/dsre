@@ -8,6 +8,7 @@ import numpy as np
 import copy
 
 class PCNN(nn.Module):
+        
     def __init__(self, dimensionC, relationTotal, dimensionWPE, dimension, 
                  window, wordTotal, PositionTotalE1, PositionTotalE2, wordVec, dropout):
         super(PCNN, self).__init__()

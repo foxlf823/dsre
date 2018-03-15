@@ -19,3 +19,8 @@ To train a model, run 'dsre.py' with the following command, where 'vec.bin', 're
 ```
 dsre.py -emb ./vec.bin -rel ./relation2id.txt -traindata ./train.txt -testdata ./test.txt -train
 ```
+
+To test using a existing model, run 'dsre.py' with the following command.
+```
+dsre.py -emb ./vec.bin -rel ./relation2id.txt -traindata ./train.txt -testdata ./test.txt -output modelpath
+```

@@ -5,6 +5,7 @@ import logging
 import torch.nn as nn
 import torch.utils.data as D
 from torch.autograd import Variable
+import traceback
 
 def prepareInput(bool_requires_grad, bool_volatile, instance_index, headList, tailList, 
                  relationList, sentenceLength,
@@ -39,10 +40,48 @@ class BagDataset(D.Dataset):
 
         return self.size
     
+def evaluate(m, bags_test, testBagGoldLabel, testheadList, testtailList, testrelationList, 
+             test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise):
+    m.eval()
+    total = 0
+    predicted = 0
+    correct = 0
+    for bag_name,bag_instance_list in bags_test.items():
+        
+        bagGoldLabelSet = testBagGoldLabel.get(bag_name)
+        bagPredictLabelSet = set()
+        
+        for instance_index in bag_instance_list:
+            
+            _, word_sequence, e1_position_sequence, e2_position_sequence, piece_wise = prepareInput(False, True, instance_index, 
+                                                                                                           testheadList, testtailList, testrelationList, 
+                                                                                                           test_sentenceLength, testtrainLists, 
+                                                                                                           testPositionE1, testPositionE2, testPieceWise)
+
+            prediction = m.forward(word_sequence, e1_position_sequence, e2_position_sequence, piece_wise, True)
+            
+            predict_relation_id = prediction.max(1)[1].cpu().data[0]
+            
+            bagPredictLabelSet.add(predict_relation_id) # at-least-one rule
+        
+        total += len(bagGoldLabelSet)
+        predicted += len(bagPredictLabelSet)
+        for label in bagPredictLabelSet:
+            if label in bagGoldLabelSet:
+                correct += 1
+        
+    p = correct / predicted
+    r = correct / total
+    if p != 0 and r != 0:
+        f1 = 2*p*r/(p+r)
+    else:
+        f1 = 0 
+    
+    return p, r, f1
 
 def train(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
-          bags_train, headList, tailList, relationList, sentenceLength, trainLists, 
-          trainPositionE1, trainPositionE2, trainPieceWise):
+          bags_train, headList, tailList, relationList, sentenceLength, trainLists, trainPositionE1, trainPositionE2, trainPieceWise, 
+          bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, testBagGoldLabel):
     dimensionC = args.conv
     dimensionWPE = args.wpe
     alpha = args.lr
@@ -56,7 +95,7 @@ def train(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTo
     
     b_train = [] # bag name list
     c_train = [] # bag index list
-    for k,v in bags_train.items():
+    for k,_ in bags_train.items():
         c_train.append(len(b_train))
         b_train.append(k)
         
@@ -65,8 +104,21 @@ def train(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTo
         train_dataloader = D.DataLoader(train_datasets, args.batch, False, num_workers=1)
     else:
         train_dataloader = D.DataLoader(train_datasets, args.batch, True, num_workers=1)
+        
+#     test_b_train = []
+#     test_c_train = []
+#     for k,_ in bags_test.items():
+#         test_c_train.append(len(test_b_train))
+#         test_b_train.append(k)
+#         
+#     test_datasets = BagDataset(test_c_train)
+#     if args.seed !=0:
+#         test_dataloader = D.DataLoader(test_datasets, args.batch, False, num_workers=1)
+#     else:
+#         test_dataloader = D.DataLoader(test_datasets, args.batch, True, num_workers=1)
 
     logging.info('training...')
+    best = 0
     
     for i in range(args.epochs):
         m.train()
@@ -117,9 +169,39 @@ def train(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTo
             batch_bag_number += 1 
             epoch_loss += batch_avg_loss
             
-        logging.info('epoch {} avg loss {}'.format(i, epoch_loss/batch_bag_number))
+        logging.debug('epoch {} avg loss {}'.format(i, epoch_loss/batch_bag_number))
+        
+        p, r, f1 = evaluate(m, bags_test, testBagGoldLabel, testheadList, testtailList, testrelationList, 
+                 test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise)
+            
+        logging.info('epoch {} p {} r {} f1 {}'.format(i, p, r, f1))
+        
+        if f1 > best:
+            logging.info('epoch {} exceed the best, saving model...'.format(i))
+            best = f1
+            torch.save(m.state_dict(), args.output+'/best.model')
+        
 
-    logging.info('training complete')
-
-def test():
-    pass
+def test(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
+        bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, testBagGoldLabel):
+    try:
+        bestModelPath = '{}/best.model'.format(args.output)
+        logging.info('loading the existing best model from {}'.format(bestModelPath))
+        model_state_dict = torch.load(bestModelPath)
+    except BaseException as e:
+        traceback.print_exc()  
+        return 
+    
+    dimensionC = args.conv
+    dimensionWPE = args.wpe
+    window = args.window
+    dropout = args.dropout
+    
+    m = utils.myCuda(model.PCNN(dimensionC, relationTotal, dimensionWPE, dimension, 
+                 window, wordTotal, PositionTotalE1, PositionTotalE2, wordVec, dropout))
+    m.load_state_dict(model_state_dict)
+    p, r, f1 = evaluate(m, bags_test, testBagGoldLabel, testheadList, testtailList, testrelationList, 
+                 test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise)
+         
+    logging.info('p {} r {} f1 {}'.format(p, r, f1))    
+    
