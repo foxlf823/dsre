@@ -131,7 +131,6 @@ def loadData(filePath, testFilePath, wordMapping, relationMapping, limit):
     trainPositionE2: e2 position id sequence of the instance
     trainPieceWise: sentence is divided into 3 piece sizes by e1 and e2
     bags_test: dict, key-e1+e2 (since we don't know answers when testing), value-instance id
-    testBagGoldLabel: dict, key is 'e1+e2', value is a set containing gold relation id in this bag.
     other parameters in test are similar as those in train.
     PositionMinE1, PositionMaxE1, PositionTotalE1: min, max, total positions of e1
     PositionMinE2, PositionMaxE2, PositionTotalE2: min, max, total positions of e2
@@ -233,7 +232,6 @@ def loadData(filePath, testFilePath, wordMapping, relationMapping, limit):
     testPositionE1 = []
     testPositionE2 = []
     testPieceWise = []
-    testBagGoldLabel = OrderedDict()
     
     with open(testFilePath, 'r') as f:
         for line in f.readlines():        
@@ -247,8 +245,10 @@ def loadData(filePath, testFilePath, wordMapping, relationMapping, limit):
             
             tail_s = line[3]
             tail = wordMapping.get(tail_s, wordMapping[UNKNOWN_WORD])
+                   
+            num = relationMapping.get(line[4], relationMapping[NIL_RELATION])
             
-            # here is different from bags_train
+            # here is different from bags_train     
             bag_list = bags_test.get(e1+"\t"+e2)
             if bag_list is None:
                 bag_list = []
@@ -257,15 +257,6 @@ def loadData(filePath, testFilePath, wordMapping, relationMapping, limit):
             else:
                 bag_list.append(len(testheadList))
             
-            num = relationMapping.get(line[4], relationMapping[NIL_RELATION])
-            
-            bagGoldLabelSet = testBagGoldLabel.get(e1+"\t"+e2)
-            if bagGoldLabelSet is None:
-                bagGoldLabelSet = set()
-                bagGoldLabelSet.add(num)
-                testBagGoldLabel[e1+"\t"+e2] = bagGoldLabelSet
-            else:
-                bagGoldLabelSet.add(num)
             
             length = 0
             lefnum = 0
@@ -341,7 +332,7 @@ def loadData(filePath, testFilePath, wordMapping, relationMapping, limit):
     PositionTotalE1 = PositionMaxE1 - PositionMinE1 + 1;
     PositionTotalE2 = PositionMaxE2 - PositionMinE2 + 1;  
     
-    return bags_train, headList, tailList, relationList, sentenceLength, trainLists, trainPositionE1, trainPositionE2, trainPieceWise, bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, testBagGoldLabel, PositionMinE1, PositionMaxE1, PositionTotalE1, PositionMinE2, PositionMaxE2, PositionTotalE2
+    return bags_train, headList, tailList, relationList, sentenceLength, trainLists, trainPositionE1, trainPositionE2, trainPieceWise, bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, PositionMinE1, PositionMaxE1, PositionTotalE1, PositionMinE2, PositionMaxE2, PositionTotalE2
     
 def myCuda(input):
     use_cuda = torch.cuda.is_available()

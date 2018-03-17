@@ -5,6 +5,7 @@ import utils
 import trainandtest
 import os
 import shutil
+import sys
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -25,11 +26,18 @@ parser.add_argument('-batch', default=16, type=int, help='Batch size for trainin
 parser.add_argument('-epochs', default=15, type=int, help='Number of epochs to train for.')
 parser.add_argument('-dropout', default=0.5, type=float, help='dropout probability')
 parser.add_argument('-output', default='./output', help='output directory')
+parser.add_argument('-signature', default='pcnn', help='the name related to all output files, such as saved models')
+parser.add_argument('-prcurve', action='store_true', help='if set, show PR curves in the output directory')
 
 args = parser.parse_args()
 logging.info('### print all arguments ###')
 utils.listArguments(args)
 logging.info('')
+
+if args.prcurve:
+    logging.info('show PR curve mode')
+    trainandtest.showPRcurve(args)
+    sys.exit() 
 
 if args.seed != 0:
     utils.setFixedSeed(args.seed)
@@ -41,21 +49,24 @@ relationMapping, nam, relationTotal = utils.loadIDMappingFile(args.rel)
 logging.info('relation number {}'.format(len(nam)))
 
 logging.info('loading data...')
-bags_train, headList, tailList, relationList, sentenceLength, trainLists, trainPositionE1, trainPositionE2, trainPieceWise, bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, testBagGoldLabel, PositionMinE1, PositionMaxE1, PositionTotalE1, PositionMinE2, PositionMaxE2, PositionTotalE2 = utils.loadData(args.traindata, args.testdata, wordMapping, relationMapping, args.limit) 
+bags_train, headList, tailList, relationList, sentenceLength, trainLists, trainPositionE1, trainPositionE2, trainPieceWise, bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, PositionMinE1, PositionMaxE1, PositionTotalE1, PositionMinE2, PositionMaxE2, PositionTotalE2 = utils.loadData(args.traindata, args.testdata, wordMapping, relationMapping, args.limit) 
 logging.info('bags in the training data: {}'.format(len(bags_train)))
 logging.info('bags in the test data: {}'.format(len(bags_test)))
 
 if args.train:
     if os.path.exists(args.output):
-        shutil.rmtree(args.output)  
-        os.mkdir(args.output)  
+#         shutil.rmtree(args.output)  
+#         os.mkdir(args.output)  
+        pass
     else:
         os.mkdir(args.output)  
     
     trainandtest.train(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
                        bags_train, headList, tailList, relationList, sentenceLength, trainLists, trainPositionE1, trainPositionE2, trainPieceWise,
-                       bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, testBagGoldLabel)
+                       bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
+                       relationMapping)
 else:
     trainandtest.test(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
-                      bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, testBagGoldLabel)
+                      bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
+                      relationMapping)
 

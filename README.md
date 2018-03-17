@@ -17,10 +17,17 @@ We also refer to the THUNLP implement on [github](https://github.com/thunlp/NRE)
 To train a model, run 'dsre.py' with the following command, where 'vec.bin', 'relatoin2id.txt', 'train.txt' and 'test.txt' can be obtained from the THUNLP implement.
 
 ```
-dsre.py -emb ./vec.bin -rel ./relation2id.txt -traindata ./train.txt -testdata ./test.txt -train
+dsre.py -signature modelname -emb ./vec.bin -rel ./relation2id.txt -traindata ./train.txt -testdata ./test.txt -train
 ```
 
 To test using a existing model, run 'dsre.py' with the following command.
+
 ```
-dsre.py -emb ./vec.bin -rel ./relation2id.txt -traindata ./train.txt -testdata ./test.txt -output modelpath
+dsre.py -signature modelname -emb ./vec.bin -rel ./relation2id.txt -traindata ./train.txt -testdata ./test.txt
+```
+
+To show the PR curves of all models in the output directory, run:
+
+```
+dsre.py -prcurve
 ```

@@ -6,6 +6,87 @@ import torch.nn as nn
 import torch.utils.data as D
 from torch.autograd import Variable
 import traceback
+from collections import OrderedDict
+from utils import NIL_RELATION
+import os
+import matplotlib.pyplot as plt
+
+def showPRcurve(args):
+        
+    # collect all *.curve from the output directory
+    allCurveFilePath = []
+    for x in os.listdir(args.output):
+        path = os.path.join(args.output,x)
+        name, extension = os.path.splitext(x)
+        if os.path.isfile(path) and extension =='.curve':
+            logging.info('find {}'.format(x))
+            allCurveFilePath.append((path, name))
+    
+    
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.ylim([0.0, 1.05])
+    plt.xlim([0.0, 1.05])
+    plt.title('Precision-Recall curve')
+     
+    fmts = ['x-','+-','*-','o-']
+    for i, (path, name) in enumerate(allCurveFilePath):
+        precision = []
+        recall = []
+        with open(path, 'r') as f:
+            for line in f.readlines():
+                _, _, _, p, _, r, _, _ = line.strip().split()
+                precision.append(float(p))
+                recall.append(float(r))
+                
+#         plt.step(recall, precision, color='b', where='pre') # follow http://scikit-learn.org/stable/auto_examples/model_selection/plot_precision_recall.html#sphx-glr-auto-examples-model-selection-plot-precision-recall-py
+        
+        fmt = fmts[i % len(fmts)]
+        plt.plot(recall, precision, fmt, label=name)   
+        
+
+    plt.legend(bbox_to_anchor=(1.0, 1), loc=1, borderaxespad=0.) 
+    plt.show()
+
+def convertToSorted(listDict):
+    # sorted by the confidence of the predicted relation
+    # each triple: position in listDict, relation id, its confidence
+    listTriple = [] 
+    for i, d in enumerate(listDict):
+        for l,s in d.items():
+            if len(listTriple) == 0:
+                listTriple.append((i, l, s))
+            else:
+                insertPosition = len(listTriple)
+                for j, t in enumerate(listTriple):
+                    if t[2] < s:
+                        insertPosition = j
+                        break
+                listTriple.insert(insertPosition, (i, l, s))
+                
+    return listTriple
+
+def generatePRCurve(path, goldLabels, predictedLabels):
+    # generate PR curve
+    prCurvePoints = []
+    preds = convertToSorted(predictedLabels)
+    prevP = -1
+    prevR = -1
+    START_OFFSET = 1
+    for i in range(START_OFFSET, len(preds)+1):
+        filteredLabels = preds[0:i]
+        p, r, f1 = score1(goldLabels, filteredLabels)
+        if p != prevP or r != prevR:
+            ratio = i / len(preds)
+            prCurvePoints.append((ratio, p, r, f1))
+            prevP = p
+            prevR = r
+    
+    # save them into a file
+    with open(path, 'w') as f:
+        for t in prCurvePoints:
+            f.write("ratio {} P {} R {} F1 {}\n".format(t[0], t[1], t[2], t[3]))
+
 
 def prepareInput(bool_requires_grad, bool_volatile, instance_index, headList, tailList, 
                  relationList, sentenceLength,
@@ -39,49 +120,104 @@ class BagDataset(D.Dataset):
     def __len__(self):
 
         return self.size
-    
-def evaluate(m, bags_test, testBagGoldLabel, testheadList, testtailList, testrelationList, 
-             test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise):
-    m.eval()
+
+def score1(listGoldLabels, listPredictedLabels):
     total = 0
     predicted = 0
     correct = 0
-    for bag_name,bag_instance_list in bags_test.items():
+    
+    for gold in listGoldLabels:
+        total += len(gold)
         
-        bagGoldLabelSet = testBagGoldLabel.get(bag_name)
-        bagPredictLabelSet = set()
+    for t in listPredictedLabels:
+        predicted += 1
+        if t[1] in listGoldLabels[t[0]]:
+            correct += 1
+    
+    p = correct / predicted
+    r = correct / total
+    if p != 0 and r != 0:
+        f1 = 2*p*r/(p+r)
+    else:
+        f1 = 0
+        
+    return p, r, f1
+    
+def score(listGoldLabels, listPredictedLabels):
+    total = 0
+    predicted = 0
+    correct = 0
+    
+    for i, _ in enumerate(listGoldLabels):
+        goldLabels = listGoldLabels[i]
+        predictedLabels = listPredictedLabels[i]
+        
+        total += len(goldLabels)
+        predicted += len(predictedLabels)
+        for label in predictedLabels.keys():
+            if label in goldLabels:
+                correct += 1
+    
+    p = correct / predicted
+    r = correct / total
+    if p != 0 and r != 0:
+        f1 = 2*p*r/(p+r)
+    else:
+        f1 = 0
+        
+    return p, r, f1
+    
+def evaluate(m, bags_test, testheadList, testtailList, testrelationList, 
+             test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
+             relationMapping):
+    m.eval()
+
+    testBagGoldLabel = []
+    testBagPredictedLabel = []
+    for _,bag_instance_list in bags_test.items():
+        
+        bagGoldLabel = set()
+        bagPredictLabel = dict()
         
         for instance_index in bag_instance_list:
             
-            _, word_sequence, e1_position_sequence, e2_position_sequence, piece_wise = prepareInput(False, True, instance_index, 
+            relation, word_sequence, e1_position_sequence, e2_position_sequence, piece_wise = prepareInput(False, True, instance_index, 
                                                                                                            testheadList, testtailList, testrelationList, 
                                                                                                            test_sentenceLength, testtrainLists, 
                                                                                                            testPositionE1, testPositionE2, testPieceWise)
 
             prediction = m.forward(word_sequence, e1_position_sequence, e2_position_sequence, piece_wise, True)
             
-            predict_relation_id = prediction.max(1)[1].cpu().data[0]
+            max_value, max_id = prediction.max(1)
+            predict_relation_id = max_id.cpu().data[0]
+            predict_relation_score = max_value.cpu().data[0]
+            relation_id = relation.cpu().data[0]
             
-            bagPredictLabelSet.add(predict_relation_id) # at-least-one rule
+            # follow Surdeanu et.al., mimlre, EMNLP, 2012
+            if relation_id != relationMapping[NIL_RELATION]:
+                bagGoldLabel.add(relation_id)
+            if predict_relation_id != relationMapping[NIL_RELATION]:
+                # follow the at-least-one rule
+                key = bagPredictLabel.get(predict_relation_id)
+                if key is None:
+                    bagPredictLabel[predict_relation_id] = predict_relation_score
+                else:
+                    if predict_relation_score > bagPredictLabel[predict_relation_id]:
+                        bagPredictLabel[predict_relation_id] = predict_relation_score
         
-        total += len(bagGoldLabelSet)
-        predicted += len(bagPredictLabelSet)
-        for label in bagPredictLabelSet:
-            if label in bagGoldLabelSet:
-                correct += 1
+
+                
+        testBagGoldLabel.append(bagGoldLabel)
+        testBagPredictedLabel.append(bagPredictLabel)
         
-    p = correct / predicted
-    r = correct / total
-    if p != 0 and r != 0:
-        f1 = 2*p*r/(p+r)
-    else:
-        f1 = 0 
+    p, r, f1 = score(testBagGoldLabel, testBagPredictedLabel)
     
-    return p, r, f1
+    return p, r, f1, testBagGoldLabel, testBagPredictedLabel
 
 def train(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
           bags_train, headList, tailList, relationList, sentenceLength, trainLists, trainPositionE1, trainPositionE2, trainPieceWise, 
-          bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, testBagGoldLabel):
+          bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
+          relationMapping):
     dimensionC = args.conv
     dimensionWPE = args.wpe
     alpha = args.lr
@@ -171,21 +307,23 @@ def train(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTo
             
         logging.debug('epoch {} avg loss {}'.format(i, epoch_loss/batch_bag_number))
         
-        p, r, f1 = evaluate(m, bags_test, testBagGoldLabel, testheadList, testtailList, testrelationList, 
-                 test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise)
+        p, r, f1, _, _ = evaluate(m, bags_test, testheadList, testtailList, testrelationList, 
+                 test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
+                 relationMapping)
             
         logging.info('epoch {} p {} r {} f1 {}'.format(i, p, r, f1))
         
         if f1 > best:
             logging.info('epoch {} exceed the best, saving model...'.format(i))
             best = f1
-            torch.save(m.state_dict(), args.output+'/best.model')
+            torch.save(m.state_dict(), args.output+'/'+args.signature+'.model')
         
 
 def test(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
-        bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, testBagGoldLabel):
+        bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
+        relationMapping):
     try:
-        bestModelPath = '{}/best.model'.format(args.output)
+        bestModelPath = args.output+'/'+args.signature+'.model'
         logging.info('loading the existing best model from {}'.format(bestModelPath))
         model_state_dict = torch.load(bestModelPath)
     except BaseException as e:
@@ -200,8 +338,13 @@ def test(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTot
     m = utils.myCuda(model.PCNN(dimensionC, relationTotal, dimensionWPE, dimension, 
                  window, wordTotal, PositionTotalE1, PositionTotalE2, wordVec, dropout))
     m.load_state_dict(model_state_dict)
-    p, r, f1 = evaluate(m, bags_test, testBagGoldLabel, testheadList, testtailList, testrelationList, 
-                 test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise)
+    p, r, f1, testBagGoldLabel, testBagPredictedLabel = evaluate(m, bags_test, testheadList, testtailList, testrelationList, 
+                 test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
+                 relationMapping)
          
     logging.info('p {} r {} f1 {}'.format(p, r, f1))    
+    
+    prCurvePath = args.output+'/'+args.signature+'.curve'
+    generatePRCurve(prCurvePath, testBagGoldLabel, testBagPredictedLabel)
+    
     
