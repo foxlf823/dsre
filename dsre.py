@@ -28,6 +28,7 @@ parser.add_argument('-dropout', default=0.5, type=float, help='dropout probabili
 parser.add_argument('-output', default='./output', help='output directory')
 parser.add_argument('-signature', default='pcnn', help='the name related to all output files, such as saved models')
 parser.add_argument('-prcurve', action='store_true', help='if set, show PR curves in the output directory')
+parser.add_argument('-model', default=1, type=int, help='1-pcnn, 2-pcnn+att')
 
 args = parser.parse_args()
 logging.info('### print all arguments ###')
@@ -53,6 +54,11 @@ bags_train, headList, tailList, relationList, sentenceLength, trainLists, trainP
 logging.info('bags in the training data: {}'.format(len(bags_train)))
 logging.info('bags in the test data: {}'.format(len(bags_test)))
 
+if args.model == 1:
+    logging.info('Use the PCNN model')
+else:
+    logging.info('Use the PCNN+ATT model')
+
 if args.train:
     if os.path.exists(args.output):
 #         shutil.rmtree(args.output)  
@@ -61,12 +67,23 @@ if args.train:
     else:
         os.mkdir(args.output)  
     
-    trainandtest.train(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
+    if args.model == 1:
+        trainandtest.trainPCNN(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
                        bags_train, headList, tailList, relationList, sentenceLength, trainLists, trainPositionE1, trainPositionE2, trainPieceWise,
                        bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
                        relationMapping)
+    else:
+        trainandtest.trainPCNN_ATT(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
+               bags_train, headList, tailList, relationList, sentenceLength, trainLists, trainPositionE1, trainPositionE2, trainPieceWise,
+               bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
+               relationMapping)
 else:
-    trainandtest.test(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
-                      bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
-                      relationMapping)
+    if args.model == 1:
+        trainandtest.testPCNN(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
+                          bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
+                          relationMapping)
+    else:
+        trainandtest.testPCNN_ATT(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
+                          bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
+                          relationMapping)        
 

@@ -4,6 +4,7 @@ import torch
 import logging
 import torch.nn as nn
 import torch.utils.data as D
+import torch.nn.functional as F
 from torch.autograd import Variable
 import traceback
 from collections import OrderedDict
@@ -167,7 +168,7 @@ def score(listGoldLabels, listPredictedLabels):
         
     return p, r, f1
     
-def evaluate(m, bags_test, testheadList, testtailList, testrelationList, 
+def evaluatePCNN(m, bags_test, testheadList, testtailList, testrelationList, 
              test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
              relationMapping):
     m.eval()
@@ -178,6 +179,7 @@ def evaluate(m, bags_test, testheadList, testtailList, testrelationList,
         
         bagGoldLabel = set()
         bagPredictLabel = dict()
+        bagPredictConfidence = utils.myCuda(Variable(torch.zeros(1, len(relationMapping)), requires_grad=False, volatile=True))
         
         for instance_index in bag_instance_list:
             
@@ -187,26 +189,29 @@ def evaluate(m, bags_test, testheadList, testtailList, testrelationList,
                                                                                                            testPositionE1, testPositionE2, testPieceWise)
 
             prediction = m.forward(word_sequence, e1_position_sequence, e2_position_sequence, piece_wise, True)
+            prediction = F.softmax(prediction, 1)
             
-            max_value, max_id = prediction.max(1)
-            predict_relation_id = max_id.cpu().data[0]
-            predict_relation_score = max_value.cpu().data[0]
+            bagPredictConfidence = torch.max(bagPredictConfidence, prediction)
+            
             relation_id = relation.cpu().data[0]
-            
-            # follow Surdeanu et.al., mimlre, EMNLP, 2012
+            # follow Surdeanu et.al., mimlre, EMNLP, 2012, NA is not evaluated
             if relation_id != relationMapping[NIL_RELATION]:
                 bagGoldLabel.add(relation_id)
-            if predict_relation_id != relationMapping[NIL_RELATION]:
-                # follow the at-least-one rule
-                key = bagPredictLabel.get(predict_relation_id)
-                if key is None:
-                    bagPredictLabel[predict_relation_id] = predict_relation_score
-                else:
-                    if predict_relation_score > bagPredictLabel[predict_relation_id]:
-                        bagPredictLabel[predict_relation_id] = predict_relation_score
         
-
-                
+        # follow THUNLP NRE, single label
+        max_value, max_id = bagPredictConfidence.max(1)
+        predict_relation_id = max_id.cpu().data[0]
+        predict_relation_score = max_value.cpu().data[0]
+        
+        if predict_relation_id != relationMapping[NIL_RELATION]:
+            # follow Surdeanu et.al., mimlre, EMNLP, 2012
+            key = bagPredictLabel.get(predict_relation_id)
+            if key is None:
+                bagPredictLabel[predict_relation_id] = predict_relation_score
+            else:
+                if predict_relation_score > bagPredictLabel[predict_relation_id]:
+                    bagPredictLabel[predict_relation_id] = predict_relation_score
+                    
         testBagGoldLabel.append(bagGoldLabel)
         testBagPredictedLabel.append(bagPredictLabel)
         
@@ -214,7 +219,7 @@ def evaluate(m, bags_test, testheadList, testtailList, testrelationList,
     
     return p, r, f1, testBagGoldLabel, testBagPredictedLabel
 
-def train(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
+def trainPCNN(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
           bags_train, headList, tailList, relationList, sentenceLength, trainLists, trainPositionE1, trainPositionE2, trainPieceWise, 
           bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
           relationMapping):
@@ -223,6 +228,7 @@ def train(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTo
     alpha = args.lr
     window = args.window
     dropout = args.dropout
+    
     
     m = utils.myCuda(model.PCNN(dimensionC, relationTotal, dimensionWPE, dimension, 
                  window, wordTotal, PositionTotalE1, PositionTotalE2, wordVec, dropout))
@@ -241,17 +247,6 @@ def train(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTo
     else:
         train_dataloader = D.DataLoader(train_datasets, args.batch, True, num_workers=1)
         
-#     test_b_train = []
-#     test_c_train = []
-#     for k,_ in bags_test.items():
-#         test_c_train.append(len(test_b_train))
-#         test_b_train.append(k)
-#         
-#     test_datasets = BagDataset(test_c_train)
-#     if args.seed !=0:
-#         test_dataloader = D.DataLoader(test_datasets, args.batch, False, num_workers=1)
-#     else:
-#         test_dataloader = D.DataLoader(test_datasets, args.batch, True, num_workers=1)
 
     logging.info('training...')
     best = 0
@@ -307,7 +302,7 @@ def train(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTo
             
         logging.debug('epoch {} avg loss {}'.format(i, epoch_loss/batch_bag_number))
         
-        p, r, f1, _, _ = evaluate(m, bags_test, testheadList, testtailList, testrelationList, 
+        p, r, f1, _, _ = evaluatePCNN(m, bags_test, testheadList, testtailList, testrelationList, 
                  test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
                  relationMapping)
             
@@ -319,7 +314,7 @@ def train(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTo
             torch.save(m.state_dict(), args.output+'/'+args.signature+'.model')
         
 
-def test(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
+def testPCNN(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
         bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
         relationMapping):
     try:
@@ -338,7 +333,178 @@ def test(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTot
     m = utils.myCuda(model.PCNN(dimensionC, relationTotal, dimensionWPE, dimension, 
                  window, wordTotal, PositionTotalE1, PositionTotalE2, wordVec, dropout))
     m.load_state_dict(model_state_dict)
-    p, r, f1, testBagGoldLabel, testBagPredictedLabel = evaluate(m, bags_test, testheadList, testtailList, testrelationList, 
+    p, r, f1, testBagGoldLabel, testBagPredictedLabel = evaluatePCNN(m, bags_test, testheadList, testtailList, testrelationList, 
+                 test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
+                 relationMapping)
+         
+    logging.info('p {} r {} f1 {}'.format(p, r, f1))    
+    
+    prCurvePath = args.output+'/'+args.signature+'.curve'
+    generatePRCurve(prCurvePath, testBagGoldLabel, testBagPredictedLabel)
+    
+def evaluatePCNN_ATT(m, bags_test, testheadList, testtailList, testrelationList, 
+             test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
+             relationMapping):
+    m.eval()
+
+    testBagGoldLabel = []
+    testBagPredictedLabel = []
+    for _,bag_instance_list in bags_test.items():
+        
+        bagGoldLabel = set()
+        bagPredictLabel = dict()
+        bagPredictConfidence = utils.myCuda(Variable(torch.zeros(1, len(relationMapping)), requires_grad=False, volatile=True))
+        
+        for r in range(len(relationMapping)):
+        
+            xList = []
+            r = utils.myCuda(Variable(torch.LongTensor([r]), requires_grad=False, volatile=True))
+        
+            for instance_index in bag_instance_list:
+            
+                relation, word_sequence, e1_position_sequence, e2_position_sequence, piece_wise = prepareInput(False, True, instance_index, 
+                                                                                                               testheadList, testtailList, testrelationList, 
+                                                                                                               test_sentenceLength, testtrainLists, 
+                                                                                                               testPositionE1, testPositionE2, testPieceWise)
+                
+                x = m.forward(word_sequence, e1_position_sequence, e2_position_sequence, piece_wise)
+                xList.append(x.view(x.size(0), 1, x.size(1)))
+                
+                relation_id = relation.cpu().data[0]
+                # follow Surdeanu et.al., mimlre, EMNLP, 2012, NA is not evaluated
+                if relation_id != relationMapping[NIL_RELATION]:
+                    bagGoldLabel.add(relation_id)
+                
+            xList = torch.cat(xList, 1)
+            prediction = m.forwardBag(xList, r)
+            prediction = F.softmax(prediction, 1)
+            
+            bagPredictConfidence = torch.max(bagPredictConfidence, prediction)
+            
+            
+        # follow THUNLP NRE, single label
+        max_value, max_id = bagPredictConfidence.max(1)
+        predict_relation_id = max_id.cpu().data[0]
+        predict_relation_score = max_value.cpu().data[0]
+        
+        if predict_relation_id != relationMapping[NIL_RELATION]:
+            # follow Surdeanu et.al., mimlre, EMNLP, 2012
+            key = bagPredictLabel.get(predict_relation_id)
+            if key is None:
+                bagPredictLabel[predict_relation_id] = predict_relation_score
+            else:
+                if predict_relation_score > bagPredictLabel[predict_relation_id]:
+                    bagPredictLabel[predict_relation_id] = predict_relation_score
+                    
+        testBagGoldLabel.append(bagGoldLabel)
+        testBagPredictedLabel.append(bagPredictLabel)
+        
+    p, r, f1 = score(testBagGoldLabel, testBagPredictedLabel)
+    
+    return p, r, f1, testBagGoldLabel, testBagPredictedLabel
+    
+def trainPCNN_ATT(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
+          bags_train, headList, tailList, relationList, sentenceLength, trainLists, trainPositionE1, trainPositionE2, trainPieceWise, 
+          bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
+          relationMapping):
+    dimensionC = args.conv
+    dimensionWPE = args.wpe
+    alpha = args.lr
+    window = args.window
+    dropout = args.dropout
+    
+    
+    m = utils.myCuda(model.PCNN_ATT(dimensionC, relationTotal, dimensionWPE, dimension, 
+                 window, wordTotal, PositionTotalE1, PositionTotalE2, wordVec, dropout))
+    optimizer = torch.optim.Adadelta(m.parameters(), lr=alpha)
+    loss_func = nn.CrossEntropyLoss()
+    
+    b_train = [] # bag name list
+    c_train = [] # bag index list
+    for k,_ in bags_train.items():
+        c_train.append(len(b_train))
+        b_train.append(k)
+        
+    train_datasets = BagDataset(c_train)
+    if args.seed != 0:
+        train_dataloader = D.DataLoader(train_datasets, args.batch, False, num_workers=1)
+    else:
+        train_dataloader = D.DataLoader(train_datasets, args.batch, True, num_workers=1)
+        
+
+    logging.info('training...')
+    best = 0
+    
+    for i in range(args.epochs):
+        m.train()
+
+        epoch_loss = 0
+        batch_bag_number = 0
+        
+        for batch_bag_index_list in train_dataloader:
+            
+            batch_loss = 0
+            
+            for bag_index in batch_bag_index_list:
+                bag = bags_train[b_train[bag_index]]
+                xList = []
+                for instance_index in bag:
+                    
+                    relation, word_sequence, e1_position_sequence, e2_position_sequence, piece_wise = prepareInput(False, False, instance_index, headList, tailList, 
+                                                                                                       relationList, sentenceLength, trainLists, trainPositionE1, 
+                                                                                                       trainPositionE2, trainPieceWise)
+
+                    x = m.forward(word_sequence, e1_position_sequence, e2_position_sequence, piece_wise)
+                    xList.append(x.view(x.size(0), 1, x.size(1)))
+                
+                xList = torch.cat(xList, 1)
+                prediction = m.forwardBag(xList, relation)
+                l = loss_func(prediction, relation)
+                
+                optimizer.zero_grad()
+                l.backward()
+                optimizer.step()
+                
+                batch_loss += l.cpu().data[0]
+            
+            batch_avg_loss = batch_loss/len(batch_bag_index_list)
+            logging.debug('batch {} avg loss {}'.format(batch_bag_number, batch_avg_loss))     
+            batch_bag_number += 1 
+            epoch_loss += batch_avg_loss
+            
+        logging.debug('epoch {} avg loss {}'.format(i, epoch_loss/batch_bag_number))
+        
+        p, r, f1, _, _ = evaluatePCNN_ATT(m, bags_test, testheadList, testtailList, testrelationList, 
+                 test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
+                 relationMapping)
+            
+        logging.info('epoch {} p {} r {} f1 {}'.format(i, p, r, f1))
+        
+        if f1 > best:
+            logging.info('epoch {} exceed the best, saving model...'.format(i))
+            best = f1
+            torch.save(m.state_dict(), args.output+'/'+args.signature+'.model')
+            
+def testPCNN_ATT(args, dimension, relationTotal, wordTotal, PositionTotalE1, PositionTotalE2, wordVec,
+        bags_test, testheadList, testtailList, testrelationList, test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
+        relationMapping):
+    try:
+        bestModelPath = args.output+'/'+args.signature+'.model'
+        logging.info('loading the existing best model from {}'.format(bestModelPath))
+        model_state_dict = torch.load(bestModelPath)
+    except BaseException as e:
+        traceback.print_exc()  
+        return 
+    
+    dimensionC = args.conv
+    dimensionWPE = args.wpe
+    window = args.window
+    dropout = args.dropout
+    
+    m = utils.myCuda(model.PCNN_ATT(dimensionC, relationTotal, dimensionWPE, dimension, 
+                 window, wordTotal, PositionTotalE1, PositionTotalE2, wordVec, dropout))
+    m.load_state_dict(model_state_dict)
+    p, r, f1, testBagGoldLabel, testBagPredictedLabel = evaluatePCNN_ATT(m, bags_test, testheadList, testtailList, testrelationList, 
                  test_sentenceLength, testtrainLists, testPositionE1, testPositionE2, testPieceWise, 
                  relationMapping)
          

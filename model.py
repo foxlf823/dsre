@@ -70,3 +70,85 @@ class PCNN(nn.Module):
         o = self.output(g)
          
         return o
+
+class PCNN_ATT(nn.Module):
+    
+    def __init__(self, dimensionC, relationTotal, dimensionWPE, dimension, 
+                 window, wordTotal, PositionTotalE1, PositionTotalE2, wordVec, dropout):
+        super(PCNN_ATT, self).__init__()
+        
+        con = math.sqrt(6.0/(3*dimensionC+relationTotal))
+        con1 = math.sqrt(6.0/((dimensionWPE+dimension)*window))        
+        
+        self.word_emb = nn.Embedding(wordTotal, dimension)
+        self.word_emb.weight = nn.Parameter(wordVec)
+        
+        self.position_e1_emb = nn.Embedding(PositionTotalE1, dimensionWPE)
+        self.position_e1_emb.weight = nn.Parameter(torch.from_numpy(np.random.uniform(-con1, con1, size=(PositionTotalE1, dimensionWPE))).float())
+        
+        self.position_e2_emb = nn.Embedding(PositionTotalE2, dimensionWPE)
+        self.position_e2_emb.weight = nn.Parameter(torch.from_numpy(np.random.uniform(-con1, con1, size=(PositionTotalE2, dimensionWPE))).float())
+    
+        self.d = dimension+2*dimensionWPE
+        self.pad_len = window-1
+        self.conv = nn.Conv2d(1, dimensionC, (window, self.d), (1, 1), (self.pad_len, 0))
+        self.conv.weight = nn.Parameter(torch.from_numpy(np.random.uniform(-con1, con1, size=(dimensionC, 1, window, self.d))).float())
+        self.conv.bias = nn.Parameter(torch.from_numpy(np.random.uniform(-con, con, size=(dimensionC))).float())
+        
+        self.matrixRelation = nn.Linear(3*dimensionC, relationTotal, True)
+        self.matrixRelation.weight = nn.Parameter(torch.from_numpy(np.random.uniform(-con, con, size=(relationTotal, 3*dimensionC))).float())
+        self.matrixRelation.bias = nn.Parameter(torch.from_numpy(np.random.uniform(-con, con, size=(relationTotal))).float())
+        
+        self.A = 0.5
+        self.hidden_size = 3*dimensionC
+            
+        self.dropout = dropout
+        
+    def forward(self, word, pos1, pos2, piece_wise): # input one sentence, get its representation
+        batch = word.size(0)
+        sent_len = word.size(1)
+        
+        emb_w = self.word_emb(word) # (batch, sent_len, word_dim)
+        emb_pos1 = self.position_e1_emb(pos1) # (batch, sent_len, position_dim)
+        emb_pos2 = self.position_e2_emb(pos2)
+        
+        q = torch.cat((emb_w, emb_pos1, emb_pos2), 2) # (batch, sent_len, self.d)
+        
+        q = q.view(batch, 1, -1, self.d) # (batch, 1, sent_len, self.d)
+        
+        c = self.conv(q) # (batch, dimensionC, sent_len+window-1, 1)
+        c = c.squeeze(dim=-1)
+        
+        # the length after conv is 'window-1' longer than sent_len
+        new_piece_wise = copy.copy(piece_wise)
+        new_piece_wise[-1] += self.pad_len
+        
+        c1, c2, c3 = utils.size_splits(c, new_piece_wise, 2)
+        p1 = F.max_pool1d(c1, new_piece_wise[0]) # (batch, dimensionC, 1)
+        p2 = F.max_pool1d(c2, new_piece_wise[1])
+        p3 = F.max_pool1d(c3, new_piece_wise[2])
+        
+        p = torch.cat((p1.squeeze(-1),p2.squeeze(-1),p3.squeeze(-1)), dim=1)
+        
+        g = F.tanh(p)
+        
+        return g
+    
+    def forwardBag(self, xList, relation): # xList (batch, bag_size, self.hidden_size)
+        
+        r = torch.index_select(self.matrixRelation.weight, 0, relation).permute(1,0) # (self.hidden_size, 1)
+        
+        alpha = torch.matmul(xList, r) * self.A
+        alpha = F.softmax(alpha, 1) # (batch, bag_size, 1)
+
+        
+        weighted = xList * alpha.expand(-1, -1, self.hidden_size)
+        s = torch.sum(weighted, 1) # (batch, self.hidden_size)
+        
+        s = F.dropout(s, self.dropout, self.training)
+        
+        o = self.matrixRelation(s)
+        
+        return o    
+    
+    
