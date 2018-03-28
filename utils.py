@@ -150,9 +150,12 @@ def loadData(filePath, testFilePath, wordMapping, relationMapping, limit):
     trainPositionE1 = []
     trainPositionE2 = []
     trainPieceWise = []
+
     
     with open(filePath, 'r') as f:
-        for line in f.readlines():        
+        for line in f.readlines():  
+            
+                  
             line = line.strip().split('\t')
             
             e1 = line[0]
@@ -164,19 +167,9 @@ def loadData(filePath, testFilePath, wordMapping, relationMapping, limit):
             tail_s = line[3]
             tail = wordMapping.get(tail_s, wordMapping[UNKNOWN_WORD])
             
-            bag_list = bags_train.get(e1+"\t"+e2+"\t"+line[4])
-            if bag_list is None:
-                bag_list = []
-                bag_list.append(len(headList))
-                bags_train[e1+"\t"+e2+"\t"+line[4]] = bag_list
-            else:
-                bag_list.append(len(headList))
-            
-            num = relationMapping.get(line[4], relationMapping[NIL_RELATION])
-            
             length = 0
-            lefnum = 0
-            rignum = 0
+            lefnum = -1
+            rignum = -1
             tmpp = []
             tokens = line[5].split()
             for con in tokens:
@@ -189,6 +182,22 @@ def loadData(filePath, testFilePath, wordMapping, relationMapping, limit):
                     rignum = length
                 length += 1
                 tmpp.append(gg)
+                
+            if lefnum ==-1 or rignum == -1:
+                logging.debug("bad lefnum {} or rignum {} in '{}'".format(lefnum, rignum, line))
+                continue
+                
+            
+            bag_list = bags_train.get(e1+"\t"+e2+"\t"+line[4])
+            if bag_list is None:
+                bag_list = []
+                bag_list.append(len(headList))
+                bags_train[e1+"\t"+e2+"\t"+line[4]] = bag_list
+            else:
+                bag_list.append(len(headList))
+            
+            num = relationMapping.get(line[4], relationMapping[NIL_RELATION])
+            
             
             headList.append(head)
             tailList.append(tail)
@@ -232,9 +241,13 @@ def loadData(filePath, testFilePath, wordMapping, relationMapping, limit):
     testPositionE1 = []
     testPositionE2 = []
     testPieceWise = []
+
     
     with open(testFilePath, 'r') as f:
-        for line in f.readlines():        
+        for line in f.readlines():
+
+                
+                    
             line = line.strip().split('\t')
             
             e1 = line[0]
@@ -245,6 +258,26 @@ def loadData(filePath, testFilePath, wordMapping, relationMapping, limit):
             
             tail_s = line[3]
             tail = wordMapping.get(tail_s, wordMapping[UNKNOWN_WORD])
+            
+            length = 0
+            lefnum = -1
+            rignum = -1
+            tmpp = []
+            tokens = line[5].split()
+            for con in tokens:
+                if con=="###END###":
+                    break;
+                gg = wordMapping.get(con, wordMapping[UNKNOWN_WORD])
+                if con == head_s: 
+                    lefnum = length
+                if con == tail_s: 
+                    rignum = length
+                length += 1
+                tmpp.append(gg)
+                
+            if lefnum ==-1 or rignum == -1:
+                logging.debug("bad lefnum {} or rignum {} in '{}'".format(lefnum, rignum, line))
+                continue
                    
             num = relationMapping.get(line[4], relationMapping[NIL_RELATION])
             
@@ -258,21 +291,7 @@ def loadData(filePath, testFilePath, wordMapping, relationMapping, limit):
                 bag_list.append(len(testheadList))
             
             
-            length = 0
-            lefnum = 0
-            rignum = 0
-            tmpp = []
-            tokens = line[5].split()
-            for con in tokens:
-                if con=="###END###":
-                    break;
-                gg = wordMapping.get(con, wordMapping[UNKNOWN_WORD])
-                if con == head_s: 
-                    lefnum = length
-                if con == tail_s: 
-                    rignum = length
-                length += 1
-                tmpp.append(gg)
+
             
             testheadList.append(head)
             testtailList.append(tail)

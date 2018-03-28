@@ -159,12 +159,20 @@ def score(listGoldLabels, listPredictedLabels):
             if label in goldLabels:
                 correct += 1
     
-    p = correct / predicted
-    r = correct / total
-    if p != 0 and r != 0:
-        f1 = 2*p*r/(p+r)
+    if predicted == 0:
+        p = 0
     else:
+        p = correct / predicted
+    
+    if total == 0:
+        r = 0
+    else:
+        r = correct / total
+        
+    if p == 0 and r == 0:
         f1 = 0
+    else:
+        f1 = 2*p*r/(p+r)
         
     return p, r, f1
     
@@ -256,18 +264,30 @@ def trainPCNN(args, dimension, relationTotal, wordTotal, PositionTotalE1, Positi
 
         epoch_loss = 0
         batch_bag_number = 0
+        bag_total_num = len(train_datasets)
+        bag_number = 0
+        show_progress = 0.1
         
         for batch_bag_index_list in train_dataloader:
             
             batch_loss = 0
+            bag_number += len(batch_bag_index_list)
+            progress = bag_number/bag_total_num
+            if progress > show_progress:
+                logging.debug('epoch {} progress {:.2%}'.format(i, progress))
+                show_progress += 0.1
             
             for bag_index in batch_bag_index_list:
                 bag = bags_train[b_train[bag_index]]
+                
+                logging.debug("bag index {}".format(bag_index))
                 
                 tmp1 = 100000000
                 tmp2 = -1
                 
                 for instance_index in bag:
+                    
+                    logging.debug("instance index {}".format(instance_index))
                     
                     relation, word_sequence, e1_position_sequence, e2_position_sequence, piece_wise = prepareInput(False, False, instance_index, headList, tailList, 
                                                                                                        relationList, sentenceLength, trainLists, trainPositionE1, 
@@ -440,10 +460,18 @@ def trainPCNN_ATT(args, dimension, relationTotal, wordTotal, PositionTotalE1, Po
 
         epoch_loss = 0
         batch_bag_number = 0
+        bag_total_num = len(train_datasets)
+        bag_number = 0
+        show_progress = 0.1
         
         for batch_bag_index_list in train_dataloader:
             
             batch_loss = 0
+            bag_number += len(batch_bag_index_list)
+            progress = bag_number/bag_total_num
+            if progress > show_progress:
+                logging.info('epoch {} progress {:.2%}'.format(i, progress))
+                show_progress += 0.1
             
             for bag_index in batch_bag_index_list:
                 bag = bags_train[b_train[bag_index]]
